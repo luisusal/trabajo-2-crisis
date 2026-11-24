@@ -41,13 +41,13 @@ int main(int argc, char *argv[]){       // le pasamos como argumentos el num de 
         }
     }
 
-    /* --- Depuración (comentar cuando ya esté comprobado) ---
+    /*/ --- Depuración (comentar cuando ya esté comprobado) ---
     printf("[DEPURACION] argc = %d\n", argc);
     printf("[DEPURACION] argv[1] = '%s' -> n_max_procs = %d\n", argv[1], n_max_procs);
     printf("[DEPURACION] velocidad = '%s'\n", velocidad);
-    --------------------------------------------------------- */
+    //---------------------------------------------------------*/
 
-    /* Imprimir el número máximo de procesos (usando write para ir cogiendo el hábito) */
+    // Imprimir el número máximo de procesos 
     char buf[128];
     int len = snprintf(buf, sizeof(buf), "Numero maximo de procesos: %d\n", n_max_procs);
     if (len > 0) {
