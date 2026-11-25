@@ -8,7 +8,7 @@
 
 int main(int argc, char *argv[]){       // le pasamos como argumentos el num de args y un string "normal" o "veloz"
   
-    int n_max_procs;
+    int n_max_procs; 
     const char *velocidad = "normal"; //velocidad normal si no lo especifica
     
     //1 comprobar numero de argumentos:
@@ -17,8 +17,8 @@ int main(int argc, char *argv[]){       // le pasamos como argumentos el num de 
         return -1;
     }
     //1 comprobar y validar n_max_procesos
-    if(argv[0][1] == '\0'){
-        fprintf(stderr, "Error: n_max_procs no puede estar vacio");
+    if(argv[1][0] == '\0'){
+        fprintf(stderr, "Error: n_max_procs no puede estar vacio\n");
         return 1;
     }
 
@@ -30,6 +30,8 @@ int main(int argc, char *argv[]){       // le pasamos como argumentos el num de 
         fprintf(stderr, "Error: n_max_procs debe ser un entero entre 3 y 34.");
         return 1;
     }
+
+    n_max_procs = (int)valor;
 
     // validar el segundo arg opcional
     if (argc == 3) {
@@ -48,12 +50,12 @@ int main(int argc, char *argv[]){       // le pasamos como argumentos el num de 
     //---------------------------------------------------------*/
 
     // Imprimir el número máximo de procesos 
-    char buf[128];
-    int len = snprintf(buf, sizeof(buf), "Numero maximo de procesos: %d\n", n_max_procs);
+    char buf[128]; //buf: es el array de char donde estará guardado el texto que queremos mostrar.
+    int len = snprintf(buf, sizeof(buf), "Numero maximo de procesos: %d\n", n_max_procs); 
     if (len > 0) {
-        if (write(1, buf, (size_t)len) == -1) {
+        if (write(1, buf, (size_t)len) == -1) { //1: es el descriptor de la salida estándar (stdout, la pantalla). (El 0 es teclado/stdin y el 2 es error/stderr).
             perror("Error en write");
-            return 1;
+            return 1; //write devuelve el número de bytes escritos si va bien, o -1 si ocurre un error
         }
     }
 
@@ -82,7 +84,7 @@ int main(int argc, char *argv[]){       // le pasamos como argumentos el num de 
         }// si procs_vivos >= n_max_procs, no crea nada y repite el bucle
     }
 
-    return 0;
+    return 0; //Retorno final de main (inaccesible mientras el for (;;) sea infinito).
 }
 
 
