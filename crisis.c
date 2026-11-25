@@ -18,7 +18,7 @@ int main(int argc, char *argv[]){       // le pasamos como argumentos el num de 
     }
     //1 comprobar y validar n_max_procesos
     if(argv[0][1] == '\0'){
-        fprrintf(stderr, "Error: n_max_procs no puede estar vacio");
+        fprintf(stderr, "Error: n_max_procs no puede estar vacio");
         return 1;
     }
 
