@@ -108,3 +108,47 @@ case 0: /* COdigo del hijo */
   close(fd);   // Cerramos el descriptor heredado
   fd=open(...  // Lo volvemos a abrir
 En el LPE anterior es evidente que el open que hace el hijo no puede llevar O_TRUNC. Si lo lleva, cuandoquiera que nazca un hijo, borrará el fichero pudiendo pillar justo antes de una lectura, que no leería nada. Lo debe abrir solamente con el flag O_RDWR
+
+
+
+
+1
+Haced un pequeño programa al que se le pase los argumentos que se especifican en el enunciado. Imprimid los argumentos para depurar y considerad las opciones de error al meterlos. Una vez controlados, comentad la depuración e imprimid el número máximo de procesos, como dice el enunciado.
+
+2
+Poned al padre en un bucle infinito en el que duerma un segundo y cree un hijo. Para no desbordar el ordenador con procesos, controlad con una variable cuántos se han creado y no crear ninguno si el número total es superior al número máximo. Dejad a los hijos en pauses.
+
+3
+Haced que el padre duerma un número de segundos al azar entre uno y cuatro. Usad las funciones srand y rand. Hacedlo de modo que varíen los números al azar en cada ejecución.
+
+4
+Sustituid la variable de control por un fichero. Tened cuidado, porque si no lo hacéis bien, no controlaréis los procesos creados y se os pueden descontrolar.
+
+5
+Registrad SIGINT de modo que el padre imprima el mensaje de finalización si pulsáis CTRL-C.
+
+6
+Haced que los hijos, al nacer impriman el mensaje de su PID. También registrad en ellos SIGINT de modo que impriman el mensaje con su PID al morir.
+
+7
+Programad ahora la muerte de los hijos.
+Metedlos en un bucle infinito, haced que duerman al azar como el padre y echad otro número al azar para ver si mueren. Si tienen que morir, que se autoenvíen SIGTERM.
+
+8
+Registrad una manejadora para SIGTERM para los hijos para que decrementen el número de procesos del fichero e impriman su PID al morir.
+
+9
+En estos momentos, los procesos mueren y el padre crea a otros nuevos, sin nunca superar el máximo. Pero hay un problema, los hijos muertos se quedan zombies. Debéis evitarlo. Una manera es registrando la señal SIGCLD en los procesos para que, cuando muera un hijo, el padre pueda hacer un wait sin bloquearse.
+Aunque hay más posibles soluciones.
+
+10
+Llega el tiempo de que los hijos tengan también hijos si no mueren y si no se ha superado el máximo. Hay que hacerlo muy similarmente a como lo hace el padre.
+
+11
+Hay ahora que programar que un proceso al morir debe matar a todos sus descendientes. Lo más fácil es hacerlo recursivamente. Los hijos tendrán la precaución de apuntar el PID de sus hijos cuando nacen y borrarlos de esa lista cuando mueren. Antes de morir ellos, en la manejadora, manda SIGTERMs a todos sus hijos vivos.
+
+12
+Programad el modo de alta velocidad. Al ejecutarlo en dicho modo, puede que se viole la condición del límite máximo de procesos por un problema de concurrencia. Debéis colocar los bloqueos de fichero adecuadamente para que no se puedan llegar a producir nunca.
+
+13
+Repasad el enunciado y acabad de pulir los últimos detalles. En particular, debéis garantizar que no se supere el número máximo de procesos en ejecución nunca, esto es, el control para permitir la creación de más procesos debe realizarse cuando estemos seguros de que el proceso que deja un hueco haya muerto. Esto puede significar refactorizar y cambiar alguno de los pasos anteriores.
