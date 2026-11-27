@@ -19,8 +19,7 @@ static void manejadora_sigint(int sig)
     }
 }
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]){
     int n_max_procs;
     const char *velocidad = "normal"; // velocidad normal si no lo especifica
 
@@ -226,3 +225,4 @@ int main(int argc, char *argv[])
     }
 
     return 0;
+}

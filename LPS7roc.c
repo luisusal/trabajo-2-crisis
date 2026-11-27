@@ -1,0 +1,424 @@
+#define __USE_POSIX
+
+#include <stdio.h>      // generales de c
+#include <stdlib.h>     // generales de c
+#include <string.h>     // para cadenas de texto
+#include <unistd.h>     // llamadas al sistema basicas
+#include <errno.h>      // define errno y codigos de error
+#include <time.h>       // para time() en la semilla de srand
+#include <fcntl.h>      // open y flags O_RDWR, O_CREAT, O_TRUNC
+#include <sys/stat.h>   // permisos de fichero en open
+#include <sys/types.h>  // pid_t, ssize_t
+#include <sys/wait.h>   // waitpid, WNOHANG
+#include <signal.h>     // sigaction, SIGINT, SIGTERM, kill
+
+#define FICHERO_CONTROL "crisis.dat"
+#define MAX_HIJOS 33
+
+static int finalizar = 0;       // se pone a 1 en el padre al recibir SIGINT
+static int morir_sigint = 0;    // se pone a 1 en el hijo al recibir SIGINT
+static int quebrar = 0;         // se pone a 1 en una filial al recibir SIGTERM
+
+static pid_t hijos_vivos[MAX_HIJOS];    //guarda PIDs
+static int num_hijos_vivos = 0;
+
+static void manejadora_sigint_padre(int sig)
+{
+    if (sig == SIGINT) {
+        finalizar = 1;
+    }
+}
+
+static void manejadora_sigint_hijo(int sig)
+{
+    if (sig == SIGINT) {
+        morir_sigint = 1;
+    }
+}
+
+static void manejadora_sigterm(int sig) //7) captura sigterm
+{
+    if (sig == SIGTERM) {
+        quebrar = 1;            //y flag quebrar a 1;
+    }
+}
+
+static void registrar_hijo(pid_t pid)   // añade a la lista hijos_vivos
+{
+    if (num_hijos_vivos < MAX_HIJOS) {  // sin pasar el limite
+        hijos_vivos[num_hijos_vivos] = pid;
+        num_hijos_vivos++;
+    }
+}
+
+static void quitar_hijo(pid_t pid)  //borra de la lista
+{
+    for (int i = 0; i < num_hijos_vivos; i++) { //recorremos para buscar el pid
+        if (hijos_vivos[i] == pid) {
+            for (int j = i; j < num_hijos_vivos - 1; j++) { // pone los indices bien tras eliminar a un hijo
+                hijos_vivos[j] = hijos_vivos[j + 1];
+            }
+            num_hijos_vivos--;
+            break;
+        }
+    }
+}
+
+static void esperar_hijos_sin_bloqueo(void)
+{// recoge a cualquier hijo
+    int estado;
+    pid_t p;
+    for (;;) {
+        p = waitpid(-1, &estado, WNOHANG);
+        if (p > 0) {
+            quitar_hijo(p);
+        } else if (p == -1 && errno == EINTR) {
+            continue;
+        } else {
+            break;
+        }
+    }
+}
+
+static void esperar_todos_los_hijos(void)//
+{
+    int estado;
+    pid_t p;
+    while (num_hijos_vivos > 0) {
+        p = waitpid(-1, &estado, 0);
+        if (p > 0) {
+            quitar_hijo(p);
+        } else if (p == -1 && errno == EINTR) {
+            continue;
+        } else {
+            break;
+        }
+    }
+}
+
+static void propagar_quiebra_a_hijos(void)
+{
+    for (int i = 0; i < num_hijos_vivos; i++) {
+        if (hijos_vivos[i] > 0) {
+            kill(hijos_vivos[i], SIGTERM);
+        }
+    }
+    esperar_todos_los_hijos();
+}
+
+static void decrementar_vivos_en_fichero(int fd)
+{
+    int vivos = 0;
+    if (fd == -1) {
+        return;
+    }
+    if (lseek(fd, 0, SEEK_SET) == -1) {
+        perror("Error en lseek al decrementar");
+        return;
+    }
+    while (lockf(fd, F_LOCK, 0) == -1) {
+        if (errno != EINTR) {
+            perror("Error en lockf F_LOCK al decrementar");
+            return;
+        }
+    }
+    if (lseek(fd, 0, SEEK_SET) != -1 &&
+        read(fd, &vivos, sizeof(int)) == (ssize_t)sizeof(int)) {
+        if (vivos > 1) {
+            vivos--;
+            if (lseek(fd, 0, SEEK_SET) != -1) {
+                if (write(fd, &vivos, sizeof(int)) != (ssize_t)sizeof(int)) {
+                    perror("Error en write al decrementar");
+                }
+            }
+        }
+    }
+    if (lseek(fd, 0, SEEK_SET) != -1) {
+        if (lockf(fd, F_ULOCK, 0) == -1) {
+            perror("Error en lockf F_ULOCK al decrementar");
+        }
+    }
+}
+
+static int escribir_mensaje_muerto(pid_t pid)
+{
+    char msg_mue[32];
+    int len_mue = snprintf(msg_mue, sizeof(msg_mue), "M(%d)\n", (int)pid);
+    if (len_mue > 0) {
+        while (write(1, msg_mue, (size_t)len_mue) == -1) {
+            if (errno != EINTR) {
+                perror("Error en write de muerte");
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
+int main(int argc, char *argv[])
+{
+    int n_max_procs;
+    const char *velocidad = "normal"; // velocidad normal si no lo especifica
+
+    // 1. Comprobar numero de argumentos:
+    if (argc < 2 || argc > 3) {
+        fprintf(stderr, "Uso: %s n_max_procs [velocidad]\n", argv[0]);
+        return 1;
+    }
+
+    // 1. Comprobar y validar n_max_procs
+    if (argv[1][0] == '\0') {
+        fprintf(stderr, "Error: n_max_procs no puede estar vacio\n");
+        return 1;
+    }
+
+    char *fin_ptr = NULL;
+    errno = 0;
+    long valor = strtol(argv[1], &fin_ptr, 10);
+
+    if (errno != 0 || *fin_ptr != '\0' || valor < 3 || valor > 34) {
+        fprintf(stderr, "Error: n_max_procs debe ser un entero entre 3 y 34.\n");
+        return 1;
+    }
+    n_max_procs = (int)valor;
+
+    // Validar el segundo arg opcional
+    if (argc == 3) {
+        if (strcmp(argv[2], "normal") == 0 || strcmp(argv[2], "veloz") == 0) {
+            velocidad = argv[2];
+        } else {
+            fprintf(stderr, "Error: velocidad debe ser 'normal' o 'veloz'.\n");
+            return 1;
+        }
+    }
+
+    // Imprimir el numero maximo de procesos
+    char buf[128];
+    int len = snprintf(buf, sizeof(buf), "Numero maximo de procesos: %d\n", n_max_procs);
+    if (len > 0) {
+        if (write(1, buf, (size_t)len) == -1) {
+            perror("Error en write");
+            return 1;
+        }
+    }
+
+    // PASO 5:
+    // Registrar SIGINT con sigaction para el padre
+    struct sigaction sa;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sa.sa_handler = manejadora_sigint_padre;
+    if (sigaction(SIGINT, &sa, NULL) == -1) {
+        perror("Error en sigaction");
+        return 1;
+    }
+
+    // PASO 4:
+    // Crear e inicializar el fichero compartido con 1 proceso vivo (el padre)
+    int fd = open(FICHERO_CONTROL, O_RDWR | O_CREAT | O_TRUNC, 0644);
+    if (fd == -1) {
+        perror("Error en open");
+        return 1;
+    }
+
+    if (lseek(fd, 0, SEEK_SET) == -1) {
+        perror("Error en lseek");
+        close(fd);
+        unlink(FICHERO_CONTROL);
+        return 1;
+    }
+    while (lockf(fd, F_LOCK, 0) == -1) {
+        if (errno != EINTR) {
+            perror("Error en lockf F_LOCK");
+            close(fd);
+            unlink(FICHERO_CONTROL);
+            return 1;
+        }
+    }
+
+    int vivos = 1; // el proceso padre principal es el 1ero
+    if (lseek(fd, 0, SEEK_SET) == -1) {
+        perror("Error en lseek");
+        lockf(fd, F_ULOCK, 0);
+        close(fd);
+        unlink(FICHERO_CONTROL);
+        return 1;
+    }
+    if (write(fd, &vivos, sizeof(int)) != (ssize_t)sizeof(int)) {
+        perror("Error en write en fichero");
+        lockf(fd, F_ULOCK, 0);
+        close(fd);
+        unlink(FICHERO_CONTROL);
+        return 1;
+    }
+
+    if (lseek(fd, 0, SEEK_SET) == -1) {
+        perror("Error en lseek");
+        close(fd);
+        unlink(FICHERO_CONTROL);
+        return 1;
+    }
+    if (lockf(fd, F_ULOCK, 0) == -1) {
+        perror("Error en lockf F_ULOCK");
+        close(fd);
+        unlink(FICHERO_CONTROL);
+        return 1;
+    }
+
+    srand((unsigned int)time(NULL) ^ (unsigned int)getpid());
+
+    while (!finalizar) {
+        esperar_hijos_sin_bloqueo();
+        if (finalizar) {
+            break;
+        }
+
+        if (strcmp(velocidad, "veloz") != 0) {
+            unsigned int segs = (unsigned int)(1 + (rand() % 4));
+            sleep(segs);
+        }
+
+        esperar_hijos_sin_bloqueo();
+        if (finalizar) {
+            break;
+        }
+
+        // Bloquear fichero, comprobar si hay hueco y reservar antes de hacer fork
+        if (lseek(fd, 0, SEEK_SET) == -1) {
+            perror("Error en lseek");
+            continue;
+        }
+        while (lockf(fd, F_LOCK, 0) == -1) {
+            if (errno != EINTR) {
+                perror("Error en lockf F_LOCK");
+                break;
+            }
+        }
+
+        int hay_hueco = 0;
+        if (!finalizar && lseek(fd, 0, SEEK_SET) != -1 &&
+            read(fd, &vivos, sizeof(int)) == (ssize_t)sizeof(int)) {
+            if (vivos < n_max_procs) {
+                vivos++;
+                if (lseek(fd, 0, SEEK_SET) != -1 &&
+                    write(fd, &vivos, sizeof(int)) == (ssize_t)sizeof(int)) {
+                    hay_hueco = 1;
+                }
+            }
+        }
+
+        if (lseek(fd, 0, SEEK_SET) != -1) {
+            lockf(fd, F_ULOCK, 0);
+        }
+
+        if (hay_hueco && !finalizar) {
+            pid_t pid = fork(); // crear proceso
+
+            if (pid == -1) {
+                perror("Error en el fork");
+                decrementar_vivos_en_fichero(fd);
+            } else if (pid == 0) {
+                // PASO 6 y PASO 7:
+                // Nueva semilla propia en el hijo y registro de SIGINT y SIGTERM
+                srand((unsigned int)time(NULL) ^ (unsigned int)getpid());
+                morir_sigint = 0;
+                quebrar = 0;
+                num_hijos_vivos = 0;
+
+                struct sigaction sa_hijo;
+                sigemptyset(&sa_hijo.sa_mask);
+                sa_hijo.sa_flags = 0;
+                sa_hijo.sa_handler = manejadora_sigint_hijo;
+                if (sigaction(SIGINT, &sa_hijo, NULL) == -1) {
+                    perror("Error en sigaction SIGINT del hijo");
+                    close(fd);
+                    return 1;
+                }
+
+                struct sigaction sa_term;
+                sigemptyset(&sa_term.sa_mask);
+                sa_term.sa_flags = 0;
+                sa_term.sa_handler = manejadora_sigterm;
+                if (sigaction(SIGTERM, &sa_term, NULL) == -1) {
+                    perror("Error en sigaction SIGTERM del hijo");
+                    close(fd);
+                    return 1;
+                }
+
+                // Cerrar descriptor heredado y abrir con O_RDWR (sin O_TRUNC)
+                close(fd);
+                fd = open(FICHERO_CONTROL, O_RDWR);
+                if (fd == -1) {
+                    perror("Error en open del hijo");
+                    return 1;
+                }
+
+                // Imprimir V(<PID>) justo al nacer el hijo
+                char msg_nac[32];
+                int len_nac = snprintf(msg_nac, sizeof(msg_nac), "V(%d)\n", (int)getpid());
+                if (len_nac > 0) {
+                    while (write(1, msg_nac, (size_t)len_nac) == -1) {
+                        if (errno != EINTR) {
+                            perror("Error en write de nacimiento");
+                            close(fd);
+                            return 1;
+                        }
+                    }
+                }
+
+                // Bucle de vida de la filial: puede quebrar por decision propia (50%) o por SIGTERM
+                while (!morir_sigint && !quebrar) {
+                    esperar_hijos_sin_bloqueo();
+                    if (morir_sigint || quebrar) {
+                        break;
+                    }
+
+                    if (strcmp(velocidad, "veloz") != 0) {
+                        unsigned int segs_h = (unsigned int)(1 + (rand() % 4));
+                        sleep(segs_h);
+                    }
+
+                    esperar_hijos_sin_bloqueo();
+                    if (morir_sigint || quebrar) {
+                        break;
+                    }
+
+                    // 50% de probabilidad de quebrar por su cuenta
+                    if ((rand() % 2) == 0) {
+                        quebrar = 1;
+                        break;
+                    }
+                }
+
+                // Propagar quiebra en cascada a los hijos de esta filial
+                propagar_quiebra_a_hijos();
+
+                // Decrementar contador en fichero compartido y escribir M(<PID>)
+                decrementar_vivos_en_fichero(fd);
+                escribir_mensaje_muerto(getpid());
+
+                close(fd);
+                return 0;
+            } else {
+                // Proceso padre: guardar PID del hijo para control y cascada
+                registrar_hijo(pid);
+            }
+        }
+    }
+
+    // Al recibir SIGINT en el proceso padre: propagar cierre a sus hijos y esperar a todos
+    propagar_quiebra_a_hijos();
+
+    close(fd);
+    unlink(FICHERO_CONTROL);
+
+    const char *msg_fin = "Programa acabado correctamente\n";
+    while (write(1, msg_fin, strlen(msg_fin)) == -1) {
+        if (errno != EINTR) {
+            perror("Error en write");
+            return 1;
+        }
+    }
+
+    return 0;
+}

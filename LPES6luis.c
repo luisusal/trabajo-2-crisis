@@ -212,7 +212,7 @@ int main(int argc, char *argv[])
                     perror("Error en sigaction del hijo");
                     close(fd);
                     return 1;
-                }
+                }//--------------------
 
                 // Cerrar descriptor heredado y abrir con O_RDWR (sin O_TRUNC)
                 close(fd);
@@ -235,7 +235,7 @@ int main(int argc, char *argv[])
 
                 // Esperar hasta recibir SIGINT para morir e imprimir M(<PID>)
                 while (!morir_sigint) { //bucle infinito de pauses
-                    pause();
+                    pause();            // al pulsar ctrl c, el flag se activa (por el sigint)
                 }
 
                 // 3. Imprimir M(<PID>) al morir por SIGINT
@@ -247,7 +247,7 @@ int main(int argc, char *argv[])
                         close(fd);
                         return 1;
                     }
-                }
+                }// lo mismo que nacer
 
                 close(fd); //tras imprimir M(<PID>) por SIGINT, cierra su acceso al fichero y termina limpiamente el proceso hijo
                 return 0;
