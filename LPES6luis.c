@@ -223,10 +223,10 @@ int main(int argc, char *argv[])
                 }
 
                 // 2. Imprimir V(<PID>) justo al nacer el hijo
-                char msg_nac[32];
-                int len_nac = snprintf(msg_nac, sizeof(msg_nac), "V(%d)\n", (int)getpid());
-                if (len_nac > 0) {
-                    if (write(1, msg_nac, (size_t)len_nac) == -1) {
+                char msg_nac[32]; //prepara array de char de 32 bytes (incluido '\0')
+                int len_nac = snprintf(msg_nac, sizeof(msg_nac), "V(%d)\n", (int)getpid()); // snprintf formatea cadena de texto y la escribe en un bufer respetando el limite max. puntero a msg_nac, tamaño, "V(%d)\n" (int)getpid() ---> mensaje a imprimir
+                if (len_nac > 0) { //comprueba que snprintf haya formateado correctamente, al menos un carácter, evitando llamar a write con longitud erronea
+                    if (write(1, msg_nac, (size_t)len_nac) == -1) { // write 1(descriptor de fichero 1, corespondiente a la salida estándar stout), mensaje, numero de bytes, convertido a size_t(tipo entero sin signo)
                         perror("Error en write de nacimiento");
                         close(fd);
                         return 1;
@@ -234,22 +234,22 @@ int main(int argc, char *argv[])
                 }
 
                 // Esperar hasta recibir SIGINT para morir e imprimir M(<PID>)
-                while (!morir_sigint) {
+                while (!morir_sigint) { //bucle infinito de pauses
                     pause();
                 }
 
                 // 3. Imprimir M(<PID>) al morir por SIGINT
                 char msg_mue[32];
-                int len_mue = snprintf(msg_mue, sizeof(msg_mue), "M(%d)\n", (int)getpid());
-                if (len_mue > 0) {
-                    if (write(1, msg_mue, (size_t)len_mue) == -1) {
+                int len_mue = snprintf(msg_mue, sizeof(msg_mue), "M(%d)\n", (int)getpid()); //guardamos el tamaño del mensaje, del pid al morir
+                if (len_mue > 0) { //valida que snprintf haya escrito al menos un carácter válido, evitando pasar longitud nula o negativa a write
+                    if (write(1, msg_mue, (size_t)len_mue) == -1) { //imprime por pantalla "M(<PID>)\n" antes de que el hijo termine por SIGINT, comprueba si falla la escritura
                         perror("Error en write de muerte");
                         close(fd);
                         return 1;
                     }
                 }
 
-                close(fd);
+                close(fd); //tras imprimir M(<PID>) por SIGINT, cierra su acceso al fichero y termina limpiamente el proceso hijo
                 return 0;
             }
         }
