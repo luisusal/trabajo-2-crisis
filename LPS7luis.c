@@ -3,16 +3,17 @@
 #include <string.h>     // para cadenas de texto
 #include <unistd.h>     // llamadas al sistema basicas
 #include <errno.h>      // define errno y codigos de error
-#include <time.h>       // para time() en la semilla de srand
+//#include <time.h>       // para time() en la semilla de srand
 #include <fcntl.h>      // open y flags O_RDWR, O_CREAT, O_TRUNC
 #include <sys/stat.h>   // permisos de fichero en open
 #include <signal.h>     // sigaction, SIGINT, SIGTERM, kill
+#define __USE_POSIX
 
 #define FICHERO_CONTROL "crisis.dat"
 
-static int finalizar = 0;       // se pone a 1 en el padre al recibir SIGINT
+static int finalizar = 0;       // se pone a 1 en el padre al recibir SIGINT, CTRL+C -> salir
 static int morir_sigint = 0;    // se pone a 1 en el hijo al recibir SIGINT
-static int morir_sigterm = 0;   // se pone a 1 en el hijo al recibir SIGTERM
+static int morir_sigterm = 0;   // se pone a 1 en el hijo al recibir SIGTERM, señal de __USE_POSIX, QUE LANZA UN PROCESO mediante kill 
 
 static void manejadora_sigint_padre(int sig)
 {
@@ -212,6 +213,7 @@ int main(int argc, char *argv[])
                 // PASO 6:
                 // 1. Registrar SIGINT y SIGTERM en el hijo
                 morir_sigint = 0;
+                //PASO 7: programar la muerte de los hijos
                 morir_sigterm = 0;
 
                 struct sigaction sa_hijo;
@@ -241,7 +243,8 @@ int main(int argc, char *argv[])
                 }
 
                 // Semilla propia del hijo combinando tiempo y su PID
-                srand((unsigned int)time(NULL) ^ (unsigned int)getpid());
+                //srand((unsigned int)time(NULL) ^ (unsigned int)getpid());
+                srand((unsigned int)getpid());
 
                 // 2. Imprimir V(<PID>) justo al nacer el hijo
                 char msg_nac[32];
@@ -267,14 +270,15 @@ int main(int argc, char *argv[])
 
                     int azar_muerte = rand() % 2; // 0 -> muere, 1 -> vive
                     if (azar_muerte == 0) {
-                        if (kill(getpid(), SIGTERM) == -1) {
+                        if (kill(getpid(), SIGTERM) == -1) { // si sale 0, el proceso hijo autoenvia la señal SIGTERM a si mismo, llamando kill(getpid(), SIGTERM)
                             perror("Error en kill SIGTERM");
                             close(fd);
                             return 1;
                         }
                     }
                 }
-
+                //Al romperse el while (bien porque llegó SIGINT con CTRL-C, bien porque se autoenvió SIGTERM y su manejadora puso morir_sigterm = 1)
+                
                 // 3. Imprimir M(<PID>) al morir (por SIGINT o por autoenvio de SIGTERM)
                 char msg_mue[32];
                 int len_mue = snprintf(msg_mue, sizeof(msg_mue), "M(%d)\n", (int)getpid());
