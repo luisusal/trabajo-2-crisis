@@ -17,7 +17,7 @@ int main(int argc, char *argv[]){       // le pasamos como argumentos el num de 
         return -1;
     }
     //1 comprobar y validar n_max_procesos
-    if(argv[0][1] == '\0'){
+    if(argv[1][0] == '\0'){
         fprintf(stderr, "Error: n_max_procs no puede estar vacio");
         return 1;
     }
@@ -84,6 +84,8 @@ int main(int argc, char *argv[]){       // le pasamos como argumentos el num de 
 
     return 0;
 }
+
+// PASO3:------------------
 
 
 // ciclo de vida de cadd proceso (mientras esta vivo)

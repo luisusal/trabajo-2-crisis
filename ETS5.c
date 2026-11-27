@@ -11,7 +11,12 @@
 #include <signal.h>     // sigaction y SIGINT
 
 #define FICHERO_CONTROL "crisis.dat"
-
+//static: restringe la visibilidad de la variable al archivo actual y le da duración estática
+static int finalizar = 0; // se pone a 1 al recibir SIGINT (CTRL-C)
+static void manejadora_sigint(int sig){
+    if (sig == SIGINT) {
+        finalizar = 1;
+    
 static int finalizar = 0; // variable de control. se pone a 1 al recibir SIGINT (CTRL-C)
 
 static void manejadora_sigint(int sig){
@@ -74,6 +79,15 @@ int main(int argc, char *argv[])
 
     // PASO 5:
     // Registrar SIGINT con sigaction para que el padre imprima al pulsar CTRL-C
+
+    struct sigaction sa; //estructura de tipo sigaction llamada sa
+
+    sigemptyset(&sa.sa_mask); //sigempty deja vacío, sin señales un conjunto de señales sigset_t. campo sa_mask de tipo sigset_t dentro de la estructura sa, indica que señales adicionales quedan bloqueadas mientras corre la manejadora
+    sa.sa_flags = 0; // si el proceso está bloqueado en una llamada como sleep o lock, y llega una señal registrada (como SIGINT) esa llamada puede interrumpirse y devolver -1 con errno == EINTR, Gracias a eso, el bucle puede comprobar la bandera finalizar y salir sin quedarse esperando a terminar la pausa
+    sa.sa_handler = manejadora_sigint; // sirve para indicarle a la estructura struct sigaction que funcion debe ejecutarse (manejadora) cuando llegue la señal SIGINT
+ 
+    if (sigaction(SIGINT, &sa, NULL) == -1) {
+
     struct sigaction sa;        // de signal.h
 
     //sa.sa_mask es un conjunto de señales (sigset_t) que quedan bloqueadas mientras se ejecuta la manejadora
