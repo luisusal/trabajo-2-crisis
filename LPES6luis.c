@@ -182,7 +182,7 @@ int main(int argc, char *argv[])
 
         if (hay_hueco && !finalizar) {
             pid_t pid = fork();
-
+//EMPEZAMOS EL BUCLE IF DEPENDIENDO DEL PID
             if (pid == -1) {
                 perror("Error en el fork");
                 if (lseek(fd, 0, SEEK_SET) != -1) {

@@ -17,7 +17,7 @@ static void manejadora_sigint(int sig){
     if (sig == SIGINT) {
         finalizar = 1;
     }
-}
+} 
 
 static int finalizar = 0; // variable de control. se pone a 1 al recibir SIGINT (CTRL-C)
 
@@ -95,7 +95,7 @@ int main(int argc, char *argv[])
 
     struct sigaction sa;        // de signal.h
 
-    //sa.sa_mask es un conjunto de señales (sigset_t) que quedan bloqueadas mientras se ejecuta la manejadora
+    /*//sa.sa_mask es un conjunto de señales (sigset_t) que quedan bloqueadas mientras se ejecuta la manejadora
     sigemptyset(&sa.sa_mask);   // inicializa la mascara dejandola vacia. 
     sa.sa_flags = 0;                    //no activamos banderas especiales
     sa.sa_handler = manejadora_sigint;  //asigna manejadora_sigint para que sepa que funcion ejectar
@@ -103,7 +103,7 @@ int main(int argc, char *argv[])
     if (sigaction(SIGINT, &sa, NULL) == -1) {//sigaction cambia el comportamiento de SIGINT, pasandole el puntero al strct sigaction, y no guardamos config de la señal anterior (NULL)
         perror("Error en sigaction");
         return 1;
-    }   //cambiamos lo que hace sigint con sigaction: ahora antes de matar el proceso, da un mensaje de error
+    }   //cambiamos lo que hace sigint con sigaction: ahora antes de matar el proceso, da un mensaje de error*/
 
     // PASO 4:
     // Crear e inicializar el fichero compartido con 1 proceso vivo (el padre)
