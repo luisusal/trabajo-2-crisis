@@ -1,5 +1,3 @@
-#define __USE_POSIX
-
 #include <stdio.h>      // generales de c
 #include <stdlib.h>     // generales de c
 #include <string.h>     // para cadenas de texto
@@ -19,8 +17,8 @@ static int finalizar = 0;       // se pone a 1 en el padre al recibir SIGINT
 static int morir_sigint = 0;    // se pone a 1 en el hijo al recibir SIGINT
 static int quebrar = 0;         // se pone a 1 en una filial al recibir SIGTERM
 
-static pid_t hijos_vivos[MAX_HIJOS];    //guarda PIDs
-static int num_hijos_vivos = 0;
+static pid_t hijos_vivos[MAX_HIJOS]; // guarda los PIDs de los hijos directos
+static int num_hijos_vivos = 0;      // cuantos hijos directos tiene registrados
 
 static void manejadora_sigint_padre(int sig)
 {
@@ -36,26 +34,26 @@ static void manejadora_sigint_hijo(int sig)
     }
 }
 
-static void manejadora_sigterm(int sig) //7) captura sigterm
+static void manejadora_sigterm(int sig)
 {
     if (sig == SIGTERM) {
-        quebrar = 1;            //y flag quebrar a 1;
+        quebrar = 1;
     }
 }
 
-static void registrar_hijo(pid_t pid)   // añade a la lista hijos_vivos
+static void guardar_hijo(pid_t pid)
 {
-    if (num_hijos_vivos < MAX_HIJOS) {  // sin pasar el limite
+    if (num_hijos_vivos < MAX_HIJOS) {
         hijos_vivos[num_hijos_vivos] = pid;
         num_hijos_vivos++;
     }
 }
 
-static void quitar_hijo(pid_t pid)  //borra de la lista
+static void eliminar_hijo(pid_t pid)
 {
-    for (int i = 0; i < num_hijos_vivos; i++) { //recorremos para buscar el pid
+    for (int i = 0; i < num_hijos_vivos; i++) {
         if (hijos_vivos[i] == pid) {
-            for (int j = i; j < num_hijos_vivos - 1; j++) { // pone los indices bien tras eliminar a un hijo
+            for (int j = i; j < num_hijos_vivos - 1; j++) {
                 hijos_vivos[j] = hijos_vivos[j + 1];
             }
             num_hijos_vivos--;
@@ -64,30 +62,15 @@ static void quitar_hijo(pid_t pid)  //borra de la lista
     }
 }
 
-static void esperar_hijos_sin_bloqueo(void)
-{// recoge a cualquier hijo
-    int estado;
-    pid_t p;
-    for (;;) {
-        p = waitpid(-1, &estado, WNOHANG);
-        if (p > 0) {
-            quitar_hijo(p);
-        } else if (p == -1 && errno == EINTR) {
-            continue;
-        } else {
-            break;
-        }
-    }
-}
-
-static void esperar_todos_los_hijos(void)//
+static void recoger_hijos_terminados(void)
 {
     int estado;
     pid_t p;
-    while (num_hijos_vivos > 0) {
-        p = waitpid(-1, &estado, 0);
+
+    for (;;) {
+        p = waitpid(-1, &estado, WNOHANG);
         if (p > 0) {
-            quitar_hijo(p);
+            eliminar_hijo(p);
         } else if (p == -1 && errno == EINTR) {
             continue;
         } else {
@@ -96,54 +79,77 @@ static void esperar_todos_los_hijos(void)//
     }
 }
 
-static void propagar_quiebra_a_hijos(void)
+static void esperar_hijos_vivos(void)
+{
+    int estado;
+    pid_t p;
+
+    while (num_hijos_vivos > 0) {
+        p = waitpid(-1, &estado, 0);
+        if (p > 0) {
+            eliminar_hijo(p);
+        } else if (p == -1 && errno == EINTR) {
+            continue;
+        } else {
+            break;
+        }
+    }
+}
+
+static void matar_hijos_y_esperar(void)
 {
     for (int i = 0; i < num_hijos_vivos; i++) {
         if (hijos_vivos[i] > 0) {
             kill(hijos_vivos[i], SIGTERM);
         }
     }
-    esperar_todos_los_hijos();
+    esperar_hijos_vivos();
 }
 
-static void decrementar_vivos_en_fichero(int fd)
+static void restar_vivo_en_fichero(int fd)
 {
     int vivos = 0;
+
     if (fd == -1) {
         return;
     }
+
     if (lseek(fd, 0, SEEK_SET) == -1) {
-        perror("Error en lseek al decrementar");
+        perror("Error en lseek al restar");
         return;
     }
+
     while (lockf(fd, F_LOCK, 0) == -1) {
         if (errno != EINTR) {
-            perror("Error en lockf F_LOCK al decrementar");
+            perror("Error en lockf F_LOCK al restar");
             return;
         }
     }
+
     if (lseek(fd, 0, SEEK_SET) != -1 &&
         read(fd, &vivos, sizeof(int)) == (ssize_t)sizeof(int)) {
         if (vivos > 1) {
             vivos--;
             if (lseek(fd, 0, SEEK_SET) != -1) {
                 if (write(fd, &vivos, sizeof(int)) != (ssize_t)sizeof(int)) {
-                    perror("Error en write al decrementar");
+                    perror("Error en write al restar");
                 }
             }
         }
     }
+
     if (lseek(fd, 0, SEEK_SET) != -1) {
         if (lockf(fd, F_ULOCK, 0) == -1) {
-            perror("Error en lockf F_ULOCK al decrementar");
+            perror("Error en lockf F_ULOCK al restar");
         }
     }
 }
 
-static int escribir_mensaje_muerto(pid_t pid)
+static int imprimir_muerte(pid_t pid)
 {
     char msg_mue[32];
     int len_mue = snprintf(msg_mue, sizeof(msg_mue), "M(%d)\n", (int)pid);
+
     if (len_mue > 0) {
         while (write(1, msg_mue, (size_t)len_mue) == -1) {
             if (errno != EINTR) {
@@ -268,7 +274,7 @@ int main(int argc, char *argv[])
     srand((unsigned int)time(NULL) ^ (unsigned int)getpid());
 
     while (!finalizar) {
-        esperar_hijos_sin_bloqueo();
+        recoger_hijos_terminados();
         if (finalizar) {
             break;
         }
@@ -278,7 +284,7 @@ int main(int argc, char *argv[])
             sleep(segs);
         }
 
-        esperar_hijos_sin_bloqueo();
+        recoger_hijos_terminados();
         if (finalizar) {
             break;
         }
@@ -312,14 +318,14 @@ int main(int argc, char *argv[])
         }
 
         if (hay_hueco && !finalizar) {
-            pid_t pid = fork(); // crear proceso
+            pid_t pid = fork();
 
             if (pid == -1) {
                 perror("Error en el fork");
-                decrementar_vivos_en_fichero(fd);
+                restar_vivo_en_fichero(fd);
             } else if (pid == 0) {
                 // PASO 6 y PASO 7:
-                // Nueva semilla propia en el hijo y registro de SIGINT y SIGTERM
+                // Semilla propia del hijo, reset de contadores/flags heredados y registro de señales
                 srand((unsigned int)time(NULL) ^ (unsigned int)getpid());
                 morir_sigint = 0;
                 quebrar = 0;
@@ -366,9 +372,9 @@ int main(int argc, char *argv[])
                     }
                 }
 
-                // Bucle de vida de la filial: puede quebrar por decision propia (50%) o por SIGTERM
+                // Bucle de vida de la filial: puede quebrar por su cuenta (50%) o por SIGTERM/SIGINT
                 while (!morir_sigint && !quebrar) {
-                    esperar_hijos_sin_bloqueo();
+                    recoger_hijos_terminados();
                     if (morir_sigint || quebrar) {
                         break;
                     }
@@ -378,7 +384,7 @@ int main(int argc, char *argv[])
                         sleep(segs_h);
                     }
 
-                    esperar_hijos_sin_bloqueo();
+                    recoger_hijos_terminados();
                     if (morir_sigint || quebrar) {
                         break;
                     }
@@ -390,24 +396,24 @@ int main(int argc, char *argv[])
                     }
                 }
 
-                // Propagar quiebra en cascada a los hijos de esta filial
-                propagar_quiebra_a_hijos();
+                // Propagar quiebra a los hijos de esta filial y esperar a que acaben
+                matar_hijos_y_esperar();
 
-                // Decrementar contador en fichero compartido y escribir M(<PID>)
-                decrementar_vivos_en_fichero(fd);
-                escribir_mensaje_muerto(getpid());
+                // Restar 1 al contador en el fichero compartido y escribir M(<PID>)
+                restar_vivo_en_fichero(fd);
+                imprimir_muerte(getpid());
 
                 close(fd);
                 return 0;
             } else {
-                // Proceso padre: guardar PID del hijo para control y cascada
-                registrar_hijo(pid);
+                // Padre: guardar PID del hijo creado
+                guardar_hijo(pid);
             }
         }
     }
 
-    // Al recibir SIGINT en el proceso padre: propagar cierre a sus hijos y esperar a todos
-    propagar_quiebra_a_hijos();
+    // Al recibir SIGINT en el padre: enviar SIGTERM a sus hijos y esperar a todos
+    matar_hijos_y_esperar();
 
     close(fd);
     unlink(FICHERO_CONTROL);
