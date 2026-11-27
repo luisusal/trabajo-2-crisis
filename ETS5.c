@@ -1,3 +1,5 @@
+#define __USE_POSIX
+
 #include <stdio.h>      // generales de c
 #include <stdlib.h>     // generales de c
 #include <string.h>     // para cadenas de texto
@@ -10,13 +12,11 @@
 
 #define FICHERO_CONTROL "crisis.dat"
 
-static volatile sig_atomic_t finalizar = 0; // se pone a 1 al recibir SIGINT (CTRL-C)
+static int finalizar = 0; // variable de control. se pone a 1 al recibir SIGINT (CTRL-C)
 
-static void manejadora_sigint(int sig)
-{
-    if (sig == SIGINT) {
-        finalizar = 1;
-    }
+static void manejadora_sigint(int sig){
+    (void)sig;      // este parametro no se usa.
+    finalizar = 1;  // marca el flag a 1 cuando recibe SIGINT.
 }
 
 int main(int argc, char *argv[])
@@ -74,14 +74,17 @@ int main(int argc, char *argv[])
 
     // PASO 5:
     // Registrar SIGINT con sigaction para que el padre imprima al pulsar CTRL-C
-    struct sigaction sa;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    sa.sa_handler = manejadora_sigint;
-    if (sigaction(SIGINT, &sa, NULL) == -1) {
+    struct sigaction sa;        // de signal.h
+
+    //sa.sa_mask es un conjunto de señales (sigset_t) que quedan bloqueadas mientras se ejecuta la manejadora
+    sigemptyset(&sa.sa_mask);   // inicializa la mascara dejandola vacia. 
+    sa.sa_flags = 0;                    //no activamos banderas especiales
+    sa.sa_handler = manejadora_sigint;  //asigna manejadora_sigint para que sepa que funcion ejectar
+
+    if (sigaction(SIGINT, &sa, NULL) == -1) {//sigaction cambia el comportamiento de SIGINT, pasandole el puntero al strct sigaction, y no guardamos config de la señal anterior (NULL)
         perror("Error en sigaction");
         return 1;
-    }
+    }   //cambiamos lo que hace sigint con sigaction: ahora antes de matar el proceso, da un mensaje de error
 
     // PASO 4:
     // Crear e inicializar el fichero compartido con 1 proceso vivo (el padre)
@@ -214,10 +217,10 @@ int main(int argc, char *argv[])
     close(fd);
     unlink(FICHERO_CONTROL);
 
-    const char *msg_fin = "Programa acabado correctamente\n";
-    size_t len_fin = strlen(msg_fin);
-    while (write(1, msg_fin, len_fin) == -1) {
-        if (errno != EINTR) {
+    const char *msg_fin = "Programa acabado correctamente\n"; //puntero a cte de char qe apunta al mensaje
+    size_t len_fin = strlen(msg_fin);   //tamaño del string en len_fin
+    while (write(1, msg_fin, len_fin) == -1) {     //write, sobre la salida standar 1, envia el mensage msg_fin, de len_fin bytes
+        if (errno != EINTR) {       //comprobamos que no haya error
             perror("Error en write de finalizacion");
             return 1;
         }
