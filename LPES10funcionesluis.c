@@ -16,31 +16,32 @@ static int finalizar = 0;          // se pone a 1 en el padre al recibir SIGINT
 static int morir_sigint = 0;       // se pone a 1 en el hijo al recibir SIGINT
 static int morir_sigterm = 0;      // se pone a 1 en el hijo al recibir SIGTERM
 static int hay_hijos_muertos = 0;  // se pone a 1 al recibir SIGCHLD
+static int fd_fichero = -1;        // descriptor propio del fichero en cada proceso
 
 static void manejadora_sigint_padre(int sig)
 {
-    if (sig == SIGINT) {
+    if (sig == SIGINT) { // ctrl c padre
         finalizar = 1;
     }
 }
 
 static void manejadora_sigint_hijo(int sig)
 {
-    if (sig == SIGINT) {
+    if (sig == SIGINT) { // ctrl c hijo
         morir_sigint = 1;
     }
 }
 
 static void manejadora_sigterm_hijo(int sig)
 {
-    if (sig == SIGTERM) {
+    if (sig == SIGTERM) { // muerte aleatoria
         morir_sigterm = 1;
     }
 }
 
 static void manejadora_sigchld(int sig)
 {
-    if (sig == SIGCHLD) {
+    if (sig == SIGCHLD) { // se autoenvia al suceder SIGTERM
         hay_hijos_muertos = 1;
     }
 }
@@ -81,7 +82,7 @@ static int ajustar_vivos_fichero(int fd, int n_max_procs, int delta, int comprob
     if (ok != NULL) {
         *ok = 0;
     }
-    if (fd == -1) {
+    if (fd < 0) {
         return -1;
     }
     if (lseek(fd, 0, SEEK_SET) == -1) {
@@ -127,9 +128,9 @@ static int ajustar_vivos_fichero(int fd, int n_max_procs, int delta, int comprob
     return 0;
 }
 
-static int crear_y_arrancar_hijo(int fd, int n_max_procs);
+static int crear_y_arrancar_hijo(int n_max_procs);
 
-static int ejecutar_ciclo_hijo(int fd, int n_max_procs)
+static int ejecutar_ciclo_hijo(int n_max_procs)
 {
     hay_hijos_muertos = 0;
     morir_sigint = 0;
@@ -142,21 +143,30 @@ static int ejecutar_ciclo_hijo(int fd, int n_max_procs)
     sa_hijo.sa_handler = manejadora_sigint_hijo;
     if (sigaction(SIGINT, &sa_hijo, NULL) == -1) {
         perror("Error en sigaction SIGINT del hijo");
-        close(fd);
+        if (fd_fichero >= 0) {
+            close(fd_fichero);
+            fd_fichero = -1;
+        }
         return 1;
     }
 
     sa_hijo.sa_handler = manejadora_sigterm_hijo;
     if (sigaction(SIGTERM, &sa_hijo, NULL) == -1) {
         perror("Error en sigaction SIGTERM del hijo");
-        close(fd);
+        if (fd_fichero >= 0) {
+            close(fd_fichero);
+            fd_fichero = -1;
+        }
         return 1;
     }
 
     // Cerrar descriptor heredado y abrir con O_RDWR (sin O_TRUNC)
-    close(fd);
-    fd = open(FICHERO_CONTROL, O_RDWR);
-    if (fd == -1) {
+    if (fd_fichero >= 0) {
+        close(fd_fichero);
+        fd_fichero = -1;
+    }
+    fd_fichero = open(FICHERO_CONTROL, O_RDWR);
+    if (fd_fichero == -1) {
         perror("Error en open del hijo");
         return 1;
     }
@@ -168,7 +178,8 @@ static int ejecutar_ciclo_hijo(int fd, int n_max_procs)
     char msg_nac[32];
     int len_nac = snprintf(msg_nac, sizeof(msg_nac), "V(%d)\n", (int)getpid());
     if (len_nac > 0 && escribir_stdout(msg_nac, (size_t)len_nac) == -1) {
-        close(fd);
+        close(fd_fichero);
+        fd_fichero = -1;
         return 1;
     }
 
@@ -192,42 +203,56 @@ static int ejecutar_ciclo_hijo(int fd, int n_max_procs)
         if (azar_muerte == 0) {
             if (kill(getpid(), SIGTERM) == -1) {
                 perror("Error en kill SIGTERM");
-                close(fd);
+                close(fd_fichero);
+                fd_fichero = -1;
                 return 1;
             }
             break;
         }
 
         if (!morir_sigint && !morir_sigterm) {
-            if (crear_y_arrancar_hijo(fd, n_max_procs) == 1) {
-                close(fd);
+            if (crear_y_arrancar_hijo(n_max_procs) == 1) {
+                if (fd_fichero >= 0) {
+                    close(fd_fichero);
+                    fd_fichero = -1;
+                }
                 return 1;
             }
         }
     }
 
     // Si muere por SIGTERM, decrementar el contador de vivos en el fichero
-    if (morir_sigterm) {
-        ajustar_vivos_fichero(fd, n_max_procs, -1, 0, NULL);
+    if (morir_sigterm && fd_fichero >= 0) {
+        ajustar_vivos_fichero(fd_fichero, n_max_procs, -1, 0, NULL);
     }
 
     // Imprimir M(<PID>) al morir
     char msg_mue[32];
     int len_mue = snprintf(msg_mue, sizeof(msg_mue), "M(%d)\n", (int)getpid());
     if (len_mue > 0 && escribir_stdout(msg_mue, (size_t)len_mue) == -1) {
-        close(fd);
+        if (fd_fichero >= 0) {
+            close(fd_fichero);
+            fd_fichero = -1;
+        }
         return 1;
     }
 
-    close(fd);
+    if (fd_fichero >= 0) {
+        close(fd_fichero);
+        fd_fichero = -1;
+    }
     return 0;
 }
 
-static int crear_y_arrancar_hijo(int fd, int n_max_procs)
+static int crear_y_arrancar_hijo(int n_max_procs)
 {
     int hay_hueco = 0;
 
-    if (ajustar_vivos_fichero(fd, n_max_procs, 1, 1, &hay_hueco) == -1) {
+    if (finalizar || morir_sigint || morir_sigterm || fd_fichero < 0) {
+        return 0;
+    }
+
+    if (ajustar_vivos_fichero(fd_fichero, n_max_procs, 1, 1, &hay_hueco) == -1) {
         return -1;
     }
 
@@ -235,10 +260,10 @@ static int crear_y_arrancar_hijo(int fd, int n_max_procs)
         pid_t pid = fork();
         if (pid == -1) {
             perror("Error en el fork");
-            ajustar_vivos_fichero(fd, n_max_procs, -1, 0, NULL);
+            ajustar_vivos_fichero(fd_fichero, n_max_procs, -1, 0, NULL);
             return -1;
         } else if (pid == 0) {
-            return ejecutar_ciclo_hijo(fd, n_max_procs);
+            return ejecutar_ciclo_hijo(n_max_procs);
         }
     }
     return 0;
@@ -309,39 +334,43 @@ int main(int argc, char *argv[])
     }
 
     // PASO 4: Crear e inicializar el fichero compartido con 1 proceso vivo (el padre)
-    int fd = open(FICHERO_CONTROL, O_RDWR | O_CREAT | O_TRUNC, 0644);
-    if (fd == -1) {
+    fd_fichero = open(FICHERO_CONTROL, O_RDWR | O_CREAT | O_TRUNC, 0644);
+    if (fd_fichero == -1) {
         perror("Error en open");
         return 1;
     }
 
     int vivos = 1;
-    if (lseek(fd, 0, SEEK_SET) == -1) {
+    if (lseek(fd_fichero, 0, SEEK_SET) == -1) {
         perror("Error en lseek");
-        close(fd);
+        close(fd_fichero);
+        fd_fichero = -1;
         unlink(FICHERO_CONTROL);
         return 1;
     }
-    while (lockf(fd, F_LOCK, 0) == -1) {
+    while (lockf(fd_fichero, F_LOCK, 0) == -1) {
         if (errno != EINTR) {
             perror("Error en lockf F_LOCK");
-            close(fd);
+            close(fd_fichero);
+            fd_fichero = -1;
             unlink(FICHERO_CONTROL);
             return 1;
         }
     }
-    if (lseek(fd, 0, SEEK_SET) == -1 ||
-        write(fd, &vivos, sizeof(int)) != (ssize_t)sizeof(int)) {
+    if (lseek(fd_fichero, 0, SEEK_SET) == -1 ||
+        write(fd_fichero, &vivos, sizeof(int)) != (ssize_t)sizeof(int)) {
         perror("Error en write en fichero");
-        lseek(fd, 0, SEEK_SET);
-        lockf(fd, F_ULOCK, 0);
-        close(fd);
+        lseek(fd_fichero, 0, SEEK_SET);
+        lockf(fd_fichero, F_ULOCK, 0);
+        close(fd_fichero);
+        fd_fichero = -1;
         unlink(FICHERO_CONTROL);
         return 1;
     }
-    if (lseek(fd, 0, SEEK_SET) == -1 || lockf(fd, F_ULOCK, 0) == -1) {
+    if (lseek(fd_fichero, 0, SEEK_SET) == -1 || lockf(fd_fichero, F_ULOCK, 0) == -1) {
         perror("Error en lockf F_ULOCK");
-        close(fd);
+        close(fd_fichero);
+        fd_fichero = -1;
         unlink(FICHERO_CONTROL);
         return 1;
     }
@@ -359,11 +388,14 @@ int main(int argc, char *argv[])
         recoger_hijos_no_bloqueante();
 
         if (!finalizar) {
-            crear_y_arrancar_hijo(fd, n_max_procs);
+            crear_y_arrancar_hijo(n_max_procs);
         }
     }
 
-    close(fd);
+    if (fd_fichero >= 0) {
+        close(fd_fichero);
+        fd_fichero = -1;
+    }
     unlink(FICHERO_CONTROL);
 
     const char *msg_fin = "Programa acabado correctamente\n";
