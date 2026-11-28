@@ -98,22 +98,22 @@ static int ajustar_vivos_fichero(int fd, int n_max_procs, int delta, int comprob
 
     if (lseek(fd, 0, SEEK_SET) != -1 &&
         read(fd, &vivos, sizeof(int)) == (ssize_t)sizeof(int)) {
-        if (delta > 0) {
+        if (delta > 0) { //si nace (delta=1)
             if (!comprobar_tope || vivos < n_max_procs) {
-                vivos += delta;
+                vivos += delta; //incrementamos contador
                 if (lseek(fd, 0, SEEK_SET) != -1 &&
                     write(fd, &vivos, sizeof(int)) == (ssize_t)sizeof(int) &&
                     ok != NULL) {
-                    *ok = 1;
+                    *ok = 1; //se ha modificado el contador
                 }
             }
-        } else if (delta < 0) {
+        } else if (delta < 0) { // si muere (delta = -1)
             if (vivos > 1) {
-                vivos += delta;
+                vivos += delta; // decrementamos contador
                 if (lseek(fd, 0, SEEK_SET) != -1 &&
                     write(fd, &vivos, sizeof(int)) == (ssize_t)sizeof(int) &&
                     ok != NULL) {
-                    *ok = 1;
+                    *ok = 1; //se ha modificado el contador
                 }
             }
         }
@@ -132,15 +132,18 @@ static int crear_y_arrancar_hijo(int n_max_procs);
 
 static int ejecutar_ciclo_hijo(int n_max_procs)
 {
-    hay_hijos_muertos = 0;
+    hay_hijos_muertos = 0; //inicializas flags a 0
     morir_sigint = 0;
     morir_sigterm = 0;
 
-    struct sigaction sa_hijo;
-    sigemptyset(&sa_hijo.sa_mask);
-    sa_hijo.sa_flags = 0;
+    struct sigaction sa_hijo; //hace el struct
 
-    sa_hijo.sa_handler = manejadora_sigint_hijo;
+    sigemptyset(&sa_hijo.sa_mask); //limpia señales basura
+
+    sa_hijo.sa_flags = 0; // si el proceso está bloqueado en una llamada como sleep o lock, y llega una señal registrada (como SIGINT) esa llamada puede interrumpirse y devolver -1 con errno == EINTR, Gracias a eso, el bucle puede comprobar la bandera finalizar y salir sin quedarse esperando a terminar la pausa
+
+    sa_hijo.sa_handler = manejadora_sigint_hijo; // sirve para indicarle a la estructura struct sigaction que funcion debe ejecutarse (manejadora) cuando llegue la señal 
+
     if (sigaction(SIGINT, &sa_hijo, NULL) == -1) {
         perror("Error en sigaction SIGINT del hijo");
         if (fd_fichero >= 0) {
@@ -150,7 +153,8 @@ static int ejecutar_ciclo_hijo(int n_max_procs)
         return 1;
     }
 
-    sa_hijo.sa_handler = manejadora_sigterm_hijo;
+    sa_hijo.sa_handler = manejadora_sigterm_hijo; //que funcion manejadora debe ejecutarse
+
     if (sigaction(SIGTERM, &sa_hijo, NULL) == -1) {
         perror("Error en sigaction SIGTERM del hijo");
         if (fd_fichero >= 0) {
@@ -172,12 +176,13 @@ static int ejecutar_ciclo_hijo(int n_max_procs)
     }
 
     // Semilla propia del proceso combinando tiempo y su PID
-    srand((unsigned int)time(NULL) ^ (unsigned int)getpid());
+    //srand((unsigned int)time(NULL) ^ (unsigned int)getpid());
+    srand((unsigned int)getpid());
 
     // Imprimir V(<PID>) justo al nacer
     char msg_nac[32];
     int len_nac = snprintf(msg_nac, sizeof(msg_nac), "V(%d)\n", (int)getpid());
-    if (len_nac > 0 && escribir_stdout(msg_nac, (size_t)len_nac) == -1) {
+    if (len_nac > 0 && escribir_stdout(msg_nac, (size_t)len_nac) == -1) {  //write
         close(fd_fichero);
         fd_fichero = -1;
         return 1;
@@ -193,7 +198,7 @@ static int ejecutar_ciclo_hijo(int n_max_procs)
             break;
         }
 
-        recoger_hijos_no_bloqueante();
+        recoger_hijos_no_bloqueante(); //no zombis (waitpid)
 
         if (morir_sigint || morir_sigterm) {
             break;
@@ -223,13 +228,13 @@ static int ejecutar_ciclo_hijo(int n_max_procs)
 
     // Si muere por SIGTERM, decrementar el contador de vivos en el fichero
     if (morir_sigterm && fd_fichero >= 0) {
-        ajustar_vivos_fichero(fd_fichero, n_max_procs, -1, 0, NULL);
+        ajustar_vivos_fichero(fd_fichero, n_max_procs, -1, 0, NULL); //delta, tope, *ok
     }
 
     // Imprimir M(<PID>) al morir
     char msg_mue[32];
     int len_mue = snprintf(msg_mue, sizeof(msg_mue), "M(%d)\n", (int)getpid());
-    if (len_mue > 0 && escribir_stdout(msg_mue, (size_t)len_mue) == -1) {
+    if (len_mue > 0 && escribir_stdout(msg_mue, (size_t)len_mue) == -1) { //write
         if (fd_fichero >= 0) {
             close(fd_fichero);
             fd_fichero = -1;
@@ -252,18 +257,18 @@ static int crear_y_arrancar_hijo(int n_max_procs)
         return 0;
     }
 
-    if (ajustar_vivos_fichero(fd_fichero, n_max_procs, 1, 1, &hay_hueco) == -1) {
+    if (ajustar_vivos_fichero(fd_fichero, n_max_procs, 1, 1, &hay_hueco) == -1) { //incrementamos
         return -1;
     }
 
-    if (hay_hueco && !finalizar && !morir_sigint && !morir_sigterm) {
+    if (hay_hueco && !finalizar && !morir_sigint && !morir_sigterm) { //vivo
         pid_t pid = fork();
         if (pid == -1) {
             perror("Error en el fork");
-            ajustar_vivos_fichero(fd_fichero, n_max_procs, -1, 0, NULL);
+            ajustar_vivos_fichero(fd_fichero, n_max_procs, -1, 0, NULL); //error : contador disminuye
             return -1;
         } else if (pid == 0) {
-            return ejecutar_ciclo_hijo(n_max_procs);
+            return ejecutar_ciclo_hijo(n_max_procs); // hace hijos
         }
     }
     return 0;
@@ -375,7 +380,8 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    srand((unsigned int)time(NULL) ^ (unsigned int)getpid());
+    //srand((unsigned int)time(NULL) ^ (unsigned int)getpid());
+    srand((unsigned int)getpid())
 
     while (!finalizar) {
         unsigned int segs = (unsigned int)(1 + (rand() % 4));
@@ -385,10 +391,10 @@ int main(int argc, char *argv[])
             break;
         }
 
-        recoger_hijos_no_bloqueante();
+        recoger_hijos_no_bloqueante(); // recoger zombies
 
         if (!finalizar) {
-            crear_y_arrancar_hijo(n_max_procs);
+            crear_y_arrancar_hijo(n_max_procs); //proceso de hijos
         }
     }
 
