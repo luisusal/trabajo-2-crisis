@@ -216,7 +216,7 @@ static int ejecutar_ciclo_hijo(int n_max_procs)
         }
 
         if (!morir_sigint && !morir_sigterm) {
-            if (crear_y_arrancar_hijo(n_max_procs) == 1) {
+            if (crear_y_arrancar_hijo(n_max_procs) == 1) { //RECURSIVIDAD
                 if (fd_fichero >= 0) {
                     close(fd_fichero);
                     fd_fichero = -1;
@@ -268,7 +268,7 @@ static int crear_y_arrancar_hijo(int n_max_procs)
             ajustar_vivos_fichero(fd_fichero, n_max_procs, -1, 0, NULL); //error : contador disminuye
             return -1;
         } else if (pid == 0) {
-            return ejecutar_ciclo_hijo(n_max_procs); // hace hijos
+            return ejecutar_ciclo_hijo(n_max_procs); // hace hijos RECURSIVIDAD
         }
     }
     return 0;
